@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">FaceDrop</string>
     <string name="select_currencies">Select Currencies</string>
+        <string name="navigation_drawer_open">Open navigation drawer</string>
+        <string name="navigation_drawer_close">Close navigation drawer</string>
+
 </resources>

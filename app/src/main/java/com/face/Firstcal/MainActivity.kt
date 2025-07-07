@@ -1,23 +1,28 @@
-package com.face.facedrop
+package com.face.Firstcal
 
 import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Bundle
+import android.preference.PreferenceManager
 import android.util.Log
-import android.view.Menu
-import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.appcompat.widget.Toolbar
 import androidx.core.content.edit
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.face.facedrop.adapter.CurrencyAdapter
+import com.face.Firstcal.adapter.CurrencyAdapter
+import com.google.android.material.navigation.NavigationView
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -26,28 +31,77 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: CurrencyAdapter
     private val preferences by lazy { getSharedPreferences("currency_prefs", MODE_PRIVATE) }
     private val selectedCurrencies = mutableListOf<String>()
-    private var allCurrencies: List<String> = emptyList() // loaded dynamically
+    private var allCurrencies: List<String> = emptyList()
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var menuHelper: MenuHelper
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ✅ Apply saved theme before super.onCreate
+        applySavedTheme()
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        drawerLayout = findViewById(R.id.drawer_layout)
+        val toolbar = findViewById<Toolbar>(R.id.toolbar)
+        setSupportActionBar(toolbar)
+
+        val navigationView = findViewById<NavigationView>(R.id.navigation_view)
+
+        val toggle = ActionBarDrawerToggle(
+            this, drawerLayout, toolbar,
+            R.string.navigation_drawer_open,
+            R.string.navigation_drawer_close
+        )
+        drawerLayout.addDrawerListener(toggle)
+        toggle.syncState()
+
+        menuHelper = MenuHelper(this)
+
+        navigationView.setNavigationItemSelectedListener { menuItem ->
+            val handled = menuHelper.onMenuItemSelected(menuItem.itemId)
+            if (handled) drawerLayout.closeDrawer(GravityCompat.START)
+            handled
+        }
 
         val factory = CurrencyViewModelFactory(preferences)
         viewModel = ViewModelProvider(this, factory)[CurrencyViewModel::class.java]
 
-        // Load saved selected currencies or default list
         val saved = preferences.getStringSet("selected_currencies", null)
+        if (saved != null && saved.isNotEmpty()) {
+            selectedCurrencies.addAll(saved)
+        } else {
+            selectedCurrencies.addAll(listOf("USD", "EUR", "INR", "JPY", "GBP", "CAD"))
+        }
+
+        val savedBaseCurrency = preferences.getString("saved_base", "USD") ?: "USD"
+        if (selectedCurrencies.isNotEmpty()) {
+            if (selectedCurrencies[0] != savedBaseCurrency) {
+                if (selectedCurrencies.contains(savedBaseCurrency)) {
+                    selectedCurrencies.remove(savedBaseCurrency)
+                }
+                selectedCurrencies.add(0, savedBaseCurrency)
+            }
+            viewModel.baseCurrency = selectedCurrencies[0]
+            preferences.edit {
+                putStringSet("selected_currencies", selectedCurrencies.toSet())
+                putString("saved_base", selectedCurrencies[0])
+            }
+        } else {
+            selectedCurrencies.add(savedBaseCurrency)
+        }
+
+        preferences.edit {
+            putStringSet("selected_currencies", selectedCurrencies.toSet())
+        }
 
         val lastUpdatedText = findViewById<TextView>(R.id.lastUpdatedText)
-
         val lastFetchMillis = preferences.getLong("last_fetch_time", 0L)
         if (lastFetchMillis > 0) {
             val now = System.currentTimeMillis()
             val diff = now - lastFetchMillis
-
             val hours = diff / (1000 * 60 * 60)
             val minutes = (diff / (1000 * 60)) % 60
-
             lastUpdatedText.text = if (diff < 24 * 60 * 60 * 1000) {
                 "✅ Last updated: ${hours}h ${minutes}m ago"
             } else {
@@ -57,16 +111,11 @@ class MainActivity : AppCompatActivity() {
             lastUpdatedText.text = "⚠️ No saved data available"
         }
 
-        if (saved != null && saved.isNotEmpty()) {
-            selectedCurrencies.addAll(saved)
-        } else {
-            selectedCurrencies.addAll(listOf("USD", "EUR", "INR", "JPY", "GBP", "CAD"))
-        }
-
         val recyclerView = findViewById<RecyclerView>(R.id.currencyList)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
-        adapter = CurrencyAdapter(selectedCurrencies,
+        adapter = CurrencyAdapter(
+            selectedCurrencies,
             onBaseCurrencyChanged = { newBaseCurrency, newBaseValue ->
                 viewModel.updateBaseCurrency(newBaseCurrency, newBaseValue)
             },
@@ -77,49 +126,26 @@ class MainActivity : AppCompatActivity() {
 
         recyclerView.adapter = adapter
 
-        // Observe currency rates and update adapter
         viewModel.rates.observe(this) { rates ->
             allCurrencies = rates.keys.sorted()
             updateLastUpdatedMessage()
 
-            // Fix: Avoid duplicates when adding baseCurrency
-            // Remove forced insert or replacement of baseCurrency here
-// Instead just trust selectedCurrencies as-is, so user changes persist
-
-// Optionally you can log if baseCurrency missing, but do not forcibly fix
             if (!selectedCurrencies.contains(viewModel.baseCurrency)) {
                 Log.w("MainActivity", "Base currency not in selectedCurrencies, but no forced fix applied.")
             }
-
             adapter.updateValues(viewModel.baseCurrency, viewModel.baseValue, rates)
         }
 
-        // Ensure cached baseCurrency is in the list (add if needed)
-        if (!selectedCurrencies.contains(viewModel.baseCurrency)) {
-            if (selectedCurrencies.isNotEmpty()) {
-                selectedCurrencies[0] = viewModel.baseCurrency
-            } else {
-                selectedCurrencies.add(viewModel.baseCurrency)
-            }
-        }
-
-        // No need to override baseCurrency now
         viewModel.baseValue = 1.0
 
-        // Initial fetch of rates
         lifecycleScope.launch {
             try {
                 viewModel.fetchRates(viewModel.baseCurrency)
             } catch (e: Exception) {
-                Toast.makeText(
-                    this@MainActivity,
-                    "Failed to fetch rates: ${e.message}",
-                    Toast.LENGTH_SHORT
-                ).show()
+                Toast.makeText(this@MainActivity, "Failed to fetch rates: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Setup keypad button listeners
         findViewById<Button>(R.id.btn0).setOnClickListener { appendDigit("0") }
         findViewById<Button>(R.id.btn1).setOnClickListener { appendDigit("1") }
         findViewById<Button>(R.id.btn2).setOnClickListener { appendDigit("2") }
@@ -136,13 +162,22 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnClear).setOnClickListener { clearAmount() }
     }
 
+    private fun applySavedTheme() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        val isDarkMode = prefs.getBoolean("dark_mode", false)
+        if (isDarkMode) {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
+        } else {
+            AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO)
+        }
+    }
+
     @SuppressLint("NotifyDataSetChanged")
     private fun appendDigit(digit: String) {
         val currency = adapter.focusedCurrency
-        Log.d("MainActivity", "Appending digit '$digit' to focusedCurrency=$currency")
         if (currency != null) {
             adapter.appendDigitToCurrencyAmount(currency, digit)
-            adapter.notifyDataSetChanged() // Force update all currencies
+            adapter.notifyDataSetChanged()
         }
     }
 
@@ -152,8 +187,6 @@ class MainActivity : AppCompatActivity() {
         if (currency != null) {
             adapter.deleteLastDigitFromCurrencyAmount(currency)
             adapter.notifyDataSetChanged()
-        } else {
-            Log.d("MainActivity", "deleteLastDigit: No focused currency")
         }
     }
 
@@ -163,72 +196,52 @@ class MainActivity : AppCompatActivity() {
         if (currency != null) {
             adapter.clearCurrencyAmount(currency)
             adapter.notifyDataSetChanged()
-        } else {
-            Log.d("MainActivity", "clearAmount: No focused currency")
-        }
-    }
-
-    override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        menuInflater.inflate(R.menu.main_menu, menu)
-        return true
-    }
-
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        return when (item.itemId) {
-            R.id.menu_select_currency -> {
-                showCurrencySelector()
-                true
-            }
-            else -> super.onOptionsItemSelected(item)
         }
     }
 
     private fun showCurrencyReplaceDialog(oldCurrency: String, position: Int) {
-        val available = allCurrencies.filter { it !in selectedCurrencies || it == oldCurrency }
-        val items = available.toTypedArray()
-
-        android.app.AlertDialog.Builder(this)
-            .setTitle("Replace $oldCurrency with...")
-            .setItems(items) { _, which ->
-                val newCurrency = items[which]
-                selectedCurrencies[position] = newCurrency
-                adapter.updateCurrencies(selectedCurrencies)
+        CurrencySelectionDialog(
+            this,
+            allCurrencies,
+            selectedCurrencies,
+            oldCurrency,
+            position
+        ) { newCurrency, pos ->
+            selectedCurrencies[pos] = newCurrency
+            adapter.updateCurrencies(selectedCurrencies)
+            preferences.edit {
+                putStringSet("selected_currencies", selectedCurrencies.toSet())
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            if (pos == 0) {
+                viewModel.baseCurrency = newCurrency
+                preferences.edit {
+                    putString("saved_base", newCurrency)
+                }
+            }
+        }.show()
     }
 
-    private fun showCurrencySelector() {
+    internal fun showCurrencySelector() {
         if (allCurrencies.isEmpty()) {
             Toast.makeText(this, "Currency list not loaded yet. Try again shortly.", Toast.LENGTH_SHORT).show()
             return
         }
-
-        CurrencySelectorDialog(
-            allCurrencies,
-            selectedCurrencies
-        ) { newSelection ->
+        CurrencySelectorDialog(allCurrencies, selectedCurrencies) { newSelection ->
             if (newSelection.isEmpty()) {
                 Toast.makeText(this, "Please select at least one currency", Toast.LENGTH_SHORT).show()
                 return@CurrencySelectorDialog
             }
-
             val newSelectedCurrencies = newSelection.toMutableList()
-
-            // If user removed baseCurrency, reset baseCurrency to first selected
             if (!newSelectedCurrencies.contains(viewModel.baseCurrency)) {
                 viewModel.baseCurrency = newSelectedCurrencies.first()
                 viewModel.baseValue = 1.0
             }
-
             selectedCurrencies.clear()
             selectedCurrencies.addAll(newSelectedCurrencies)
             preferences.edit {
                 putStringSet("selected_currencies", selectedCurrencies.toSet())
             }
-
             adapter.updateCurrencies(selectedCurrencies)
-
             lifecycleScope.launch {
                 try {
                     viewModel.fetchRates(viewModel.baseCurrency)
@@ -246,16 +259,22 @@ class MainActivity : AppCompatActivity() {
             lastUpdatedText.text = "⚠️ No saved data available"
             return
         }
-
         val now = System.currentTimeMillis()
         val diff = now - lastFetchMillis
         val hours = diff / (1000 * 60 * 60)
         val minutes = (diff / (1000 * 60)) % 60
-
         lastUpdatedText.text = if (diff < 24 * 60 * 60 * 1000) {
             "✅ Last updated: ${hours}h ${minutes}m ago"
         } else {
             "⚠️ Using old data: Last updated over 1 day ago"
+        }
+    }
+
+    override fun onBackPressed() {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START)
+        } else {
+            super.onBackPressed()
         }
     }
 
@@ -265,7 +284,6 @@ class MainActivity : AppCompatActivity() {
                 val rect = android.graphics.Rect()
                 view.getGlobalVisibleRect(rect)
                 if (!rect.contains(ev.rawX.toInt(), ev.rawY.toInt())) {
-                    // User tapped outside the focused EditText
                     val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
                     imm.hideSoftInputFromWindow(view.windowToken, 0)
                     view.clearFocus()

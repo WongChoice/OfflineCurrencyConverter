@@ -1,18 +1,19 @@
-package com.face.facedrop.adapter
+package com.face.Firstcal.adapter
 
 import android.text.Editable
 import android.text.TextWatcher
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
-import com.face.facedrop.databinding.ItemCurrencyBinding
+import com.face.Firstcal.CurrencyRowHelper
+import com.face.Firstcal.databinding.ItemCurrencyBinding
 
 class CurrencyAdapter(
     private var currencies: MutableList<String>,
     private val onBaseCurrencyChanged: (String, Double) -> Unit,
     private val onCurrencyReplaceRequested: (oldCurrency: String, position: Int) -> Unit
-
 ) : RecyclerView.Adapter<CurrencyAdapter.CurrencyViewHolder>() {
 
     private val valuesString = mutableMapOf<String, String>()
@@ -22,6 +23,21 @@ class CurrencyAdapter(
     private var baseCurrency: String = "USD"
     private var baseValue: Double = 1.0
     var focusedCurrency: String? = null
+        private set
+
+    private lateinit var rowHelper: CurrencyRowHelper
+    private var recyclerViewRef: RecyclerView? = null
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        recyclerViewRef = recyclerView
+        rowHelper = CurrencyRowHelper(recyclerView.context)
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        recyclerViewRef = null
+    }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): CurrencyViewHolder {
         val binding = ItemCurrencyBinding.inflate(LayoutInflater.from(parent.context), parent, false)
@@ -30,7 +46,21 @@ class CurrencyAdapter(
 
     override fun onBindViewHolder(holder: CurrencyViewHolder, position: Int) {
         val currency = currencies[position]
+        val rowLayout = holder.binding.root as LinearLayout
+        val editText = holder.binding.currencyValue
+
         holder.bind(currency, baseCurrency, baseValue, rates[currency] ?: 1.0)
+
+        rowHelper.setRowClickBehavior(rowLayout, editText, currency, { newFocusedCurrency ->
+            if (focusedCurrency != newFocusedCurrency) {
+                focusedCurrency = newFocusedCurrency
+                notifyDataSetChanged()
+                recyclerViewRef?.scrollToPosition(position)
+            }
+        }, onCurrencyReplaceRequested = {
+            this.onCurrencyReplaceRequested(currency, position)
+        })
+
     }
 
     override fun getItemCount(): Int = currencies.size
@@ -98,7 +128,7 @@ class CurrencyAdapter(
         }
     }
 
-    inner class CurrencyViewHolder(private val binding: ItemCurrencyBinding) : RecyclerView.ViewHolder(binding.root) {
+    inner class CurrencyViewHolder(internal val binding: ItemCurrencyBinding) : RecyclerView.ViewHolder(binding.root) {
         private var currentWatcher: TextWatcher? = null
 
         fun bind(currency: String, baseCurrency: String, baseValue: Double, rate: Double) {

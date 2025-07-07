@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:id="@+id/menu_select_currency"
+        android:title="Select Currency"
+        />
+
+    <item
+        android:id="@+id/action_support_us"
+        android:title="Support Us"
+         />
+
+    <item
+        android:id="@+id/action_source_code"
+        android:title="Source Code"
+        />
+
+    <item
+        android:id="@+id/action_preferences"
+        android:title="Preferences"
+        />
+
+    <item
+        android:id="@+id/action_about"
+        android:title="About"
+         />
+    <item
+        android:id="@+id/action_toggle_theme"
+        android:title="Toggle Theme"
+        android:icon="@drawable/sym_def_app_icon" />
+
+</menu>

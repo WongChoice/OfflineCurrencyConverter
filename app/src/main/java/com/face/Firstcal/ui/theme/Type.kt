@@ -1,4 +1,4 @@
-package com.face.facedrop.ui.theme
+package com.face.Firstcal.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

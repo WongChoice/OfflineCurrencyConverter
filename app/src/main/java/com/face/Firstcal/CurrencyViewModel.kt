@@ -1,4 +1,4 @@
-package com.face.facedrop
+package com.face.Firstcal
 
 import android.content.SharedPreferences
 import androidx.lifecycle.*
@@ -84,7 +84,10 @@ class CurrencyViewModel(private val prefs: SharedPreferences) : ViewModel() {
 
 
             _rates.postValue(savedRates)
-            baseCurrency = savedBase.uppercase()
+// Only override baseCurrency if it's not already set (e.g., during app start)
+            if (baseCurrency.isBlank()) {
+                baseCurrency = savedBase.uppercase()
+            }
         } else {
             println("⚠️ No saved rates found.")
         }
