@@ -20,8 +20,9 @@ class CurrencyAdapter(
     private val values = mutableMapOf<String, Double>()
     private var rates: Map<String, Double> = emptyMap()
 
-    private var baseCurrency: String = "USD"
-    private var baseValue: Double = 1.0
+    private var baseCurrencyInternal: String = "USD"
+    private var baseValueInternal: Double = 1.0
+
     var focusedCurrency: String? = null
         private set
 
@@ -49,7 +50,7 @@ class CurrencyAdapter(
         val rowLayout = holder.binding.root as LinearLayout
         val editText = holder.binding.currencyValue
 
-        holder.bind(currency, baseCurrency, baseValue, rates[currency] ?: 1.0)
+        holder.bind(currency)
 
         rowHelper.setRowClickBehavior(rowLayout, editText, currency, { newFocusedCurrency ->
             if (focusedCurrency != newFocusedCurrency) {
@@ -60,27 +61,26 @@ class CurrencyAdapter(
         }, onCurrencyReplaceRequested = {
             this.onCurrencyReplaceRequested(currency, position)
         })
-
     }
 
     override fun getItemCount(): Int = currencies.size
 
     fun updateCurrencies(newCurrencies: List<String>) {
         currencies = newCurrencies.toMutableList()
-        notifyDataSetChanged()
+        // After updating currencies, auto-update values using stored base and rates
+        updateValues(baseCurrencyInternal, baseValueInternal, rates)
     }
 
     fun updateValues(baseCurrency: String, baseValue: Double, rates: Map<String, Double>) {
-        this.baseCurrency = baseCurrency
-        this.baseValue = baseValue
+        this.baseCurrencyInternal = baseCurrency
+        this.baseValueInternal = baseValue
         this.rates = rates
 
         currencies.forEach { currency ->
-            val rate = if (currency == baseCurrency) 1.0 else {
-                val baseToUsd = rates[baseCurrency] ?: 1.0
-                val targetToUsd = rates[currency] ?: 1.0
-                targetToUsd / baseToUsd
-            }
+            val inputToUsd = 1.0 / (rates[baseCurrency] ?: 1.0)
+            val usdToTarget = rates[currency] ?: 1.0
+
+            val rate = inputToUsd * usdToTarget
             val newValue = baseValue * rate
 
             values[currency] = newValue
@@ -94,6 +94,11 @@ class CurrencyAdapter(
     }
 
     fun appendDigitToCurrencyAmount(currency: String, digit: String) {
+        if (focusedCurrency != currency) {
+            Log.d("CurrencyAdapter", "Ignored append; $currency is not focused")
+            return
+        }
+
         val currentText = valuesString[currency] ?: "0"
 
         val newText = when {
@@ -107,12 +112,21 @@ class CurrencyAdapter(
     }
 
     fun deleteLastDigitFromCurrencyAmount(currency: String) {
+        if (focusedCurrency != currency) {
+            Log.d("CurrencyAdapter", "Ignored delete; $currency is not focused")
+            return
+        }
+
         val currentText = valuesString[currency] ?: "0"
         val newText = if (currentText.length <= 1) "0" else currentText.dropLast(1)
         updateCurrencyAmount(currency, newText)
     }
-
     fun clearCurrencyAmount(currency: String) {
+        if (focusedCurrency != currency) {
+            Log.d("CurrencyAdapter", "Ignored clear; $currency is not focused")
+            return
+        }
+
         updateCurrencyAmount(currency, "0")
     }
 
@@ -121,9 +135,7 @@ class CurrencyAdapter(
         val newValue = newText.toDoubleOrNull() ?: 0.0
         values[currency] = newValue
 
-        if (baseCurrency != currency || baseValue != newValue) {
-            baseCurrency = currency
-            baseValue = newValue
+        if (focusedCurrency == currency) {
             onBaseCurrencyChanged(currency, newValue)
         }
     }
@@ -131,7 +143,7 @@ class CurrencyAdapter(
     inner class CurrencyViewHolder(internal val binding: ItemCurrencyBinding) : RecyclerView.ViewHolder(binding.root) {
         private var currentWatcher: TextWatcher? = null
 
-        fun bind(currency: String, baseCurrency: String, baseValue: Double, rate: Double) {
+        fun bind(currency: String) {
             binding.currencyCode.text = currency
             binding.root.setOnClickListener {
                 onCurrencyReplaceRequested(currency, bindingAdapterPosition)
@@ -146,9 +158,7 @@ class CurrencyAdapter(
                     binding.currencyValue.setSelection(rawText.length)
                 }
             } else {
-                val convertedValue = if (currency == baseCurrency) baseValue else baseValue * rate
-                val formatted = String.format("%.2f", convertedValue)
-                valuesString[currency] = formatted
+                val formatted = valuesString[currency] ?: "0.00"
                 if (binding.currencyValue.text.toString() != formatted) {
                     binding.currencyValue.setText(formatted)
                 }
